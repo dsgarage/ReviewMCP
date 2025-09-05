@@ -1,4 +1,6 @@
-import { Server, Tool } from "@modelcontextprotocol/sdk";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
@@ -226,105 +228,80 @@ async function applyFixes(cwd: string, fixes: any[]) {
   return applied;
 }
 
-const server = new Server({ name: "review-mcp", version: "0.1.0" });
-
-server.tool(new Tool({
-  name: "review.version",
-  description: "Return Re:VIEW CLI version (prefers bundle exec).",
-  inputSchema: { type: "object", properties: { cwd: { type: "string" } }, required: ["cwd"] },
-  handler: async ({ cwd }) => {
-    const { stdout } = await withBundle(cwd, ["review", "--version"]);
-    return { version: stdout.trim() };
-  }
-}));
-
-server.tool(new Tool({
-  name: "review.tags.list",
-  description: "Return allowed tags (built-in conservative list; replace with dynamic probe later).",
-  inputSchema: { type: "object", properties: { cwd: { type: "string" }, profile: { type: "string" } }, required: ["cwd"] },
-  handler: async ({ cwd }) => {
-    // TODO: add dynamic probe & cache per profile/version/target
-    return { blocks: BUILTIN_ALLOW.blocks, inline: BUILTIN_ALLOW.inline, meta: { source: "builtin" } };
-  }
-}));
-
-server.tool(new Tool({
-  name: "review.enforceTags.check",
-  description: "Scan .re files for unknown tags using allowlist; returns violations.",
-  inputSchema: { type: "object",
-    properties: { cwd: { type: "string" }, allow: { type: "object" } },
-    required: ["cwd"]
+const server = new Server(
+  { 
+    name: "review-mcp", 
+    version: "0.1.0" 
   },
-  handler: async ({ cwd, allow }) => {
-    const cfg = await loadConfig(cwd);
-    const files = await pickFilesFromCatalog(cwd);
-    const a: Allow = allow ?? BUILTIN_ALLOW;
-    const violations: any[] = [];
-    for (const f of files) {
-      const p = path.join(cwd, f);
-      try {
-        const txt = await fs.readFile(p, "utf-8");
-        for (const v of scanTags(f, txt, a)) violations.push(v);
-      } catch (e) {
-        violations.push({ file: f, error: String(e) });
-      }
+  {
+    capabilities: {
+      tools: {}
     }
-    return { profile: cfg.profile, violations };
   }
-}));
+);
 
-server.tool(new Tool({
-  name: "review.fixIds.plan",
-  description: "Plan auto-fixes for empty/duplicate IDs across all .re files.",
-  inputSchema: { type: "object", properties: { cwd: { type: "string" } }, required: ["cwd"] },
-  handler: async ({ cwd }) => {
-    const files = await pickFilesFromCatalog(cwd);
-    const used = await gatherUsedIds(cwd, files);
-    const fixes: any[] = [];
-    for (const f of files) {
-      const p = path.join(cwd, f);
-      const txt = await fs.readFile(p, "utf-8");
-      const prefix = slugifyBase(f);
-      const plan = planFixIdsForFile(f, txt, used, prefix);
-      fixes.push(...plan);
+// Tool definitions
+const tools = [
+  {
+    name: "review.version",
+    description: "Return Re:VIEW CLI version (prefers bundle exec).",
+    inputSchema: { 
+      type: "object", 
+      properties: { cwd: { type: "string" } }, 
+      required: ["cwd"] 
     }
-    return { count: fixes.length, fixes };
-  }
-}));
-
-server.tool(new Tool({
-  name: "review.fixIds.apply",
-  description: "Apply a previously calculated ID-fix plan; creates .bak backups.",
-  inputSchema: {
-    type: "object",
-    properties: { cwd: { type: "string" }, fixes: { type: "array", items: { type: "object" } } },
-    required: ["cwd","fixes"]
   },
-  handler: async ({ cwd, fixes }) => {
-    const applied = await applyFixes(cwd, fixes);
-    return { applied };
-  }
-}));
 
-server.tool(new Tool({
-  name: "review.lint",
-  description: "Run a fast sanity check by compiling each .re to latex and parsing stderr warnings.",
-  inputSchema: { type: "object", properties: { cwd: { type: "string" } }, required: ["cwd"] },
-  handler: async ({ cwd }) => {
-    const files = await pickFilesFromCatalog(cwd);
-    const diagnostics: any[] = [];
-    for (const f of files) {
-      try {
-        await withBundle(cwd, ["review-compile", "--target=latex", "--footnotetext", f]);
-      } catch (e: any) {
-        const stderr = e?.stderr || e?.message || "";
-        diagnostics.push(...parseStderr(stderr, f));
-        continue;
-      }
+  {
+    name: "review.tags.list",
+    description: "Return allowed tags (built-in conservative list; replace with dynamic probe later).",
+    inputSchema: { 
+      type: "object", 
+      properties: { cwd: { type: "string" }, profile: { type: "string" } }, 
+      required: ["cwd"] 
     }
-    return { diagnostics };
+  },
+
+  {
+    name: "review.enforceTags.check",
+    description: "Scan .re files for unknown tags using allowlist; returns violations.",
+    inputSchema: { 
+      type: "object",
+      properties: { cwd: { type: "string" }, allow: { type: "object" } },
+      required: ["cwd"]
+    }
+  },
+
+  {
+    name: "review.fixIds.plan",
+    description: "Plan auto-fixes for empty/duplicate IDs across all .re files.",
+    inputSchema: { 
+      type: "object", 
+      properties: { cwd: { type: "string" } }, 
+      required: ["cwd"] 
+    }
+  },
+
+  {
+    name: "review.fixIds.apply",
+    description: "Apply a previously calculated ID-fix plan; creates .bak backups.",
+    inputSchema: {
+      type: "object",
+      properties: { cwd: { type: "string" }, fixes: { type: "array", items: { type: "object" } } },
+      required: ["cwd","fixes"]
+    }
+  },
+
+  {
+    name: "review.lint",
+    description: "Run a fast sanity check by compiling each .re to latex and parsing stderr warnings.",
+    inputSchema: { 
+      type: "object", 
+      properties: { cwd: { type: "string" } }, 
+      required: ["cwd"] 
+    }
   }
-}));
+];
 
 function parseStderr(stderr: string, fallbackFile?: string) {
   const diags: any[] = [];
@@ -346,5 +323,131 @@ function parseStderr(stderr: string, fallbackFile?: string) {
   return diags;
 }
 
-server.start();
+// Register handlers
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: tools
+  };
+});
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  
+  // Type guard for arguments
+  if (!args || typeof args !== 'object') {
+    throw new Error('Invalid arguments');
+  }
+  
+  switch (name) {
+    case "review.version": {
+      const { stdout } = await withBundle(args.cwd as string, ["review", "--version"]);
+      return { 
+        content: [
+          { type: "text", text: JSON.stringify({ version: stdout.trim() }) }
+        ]
+      };
+    }
+    
+    case "review.tags.list": {
+      return { 
+        content: [
+          { 
+            type: "text", 
+            text: JSON.stringify({ 
+              blocks: BUILTIN_ALLOW.blocks, 
+              inline: BUILTIN_ALLOW.inline, 
+              meta: { source: "builtin" } 
+            }) 
+          }
+        ]
+      };
+    }
+    
+    case "review.enforceTags.check": {
+      const cfg = await loadConfig(args.cwd as string);
+      const files = await pickFilesFromCatalog(args.cwd as string);
+      const a: Allow = (args.allow as Allow) ?? BUILTIN_ALLOW;
+      const violations: any[] = [];
+      for (const f of files) {
+        const p = path.join(args.cwd as string, f);
+        try {
+          const txt = await fs.readFile(p, "utf-8");
+          for (const v of scanTags(f, txt, a)) violations.push(v);
+        } catch (e) {
+          violations.push({ file: f, error: String(e) });
+        }
+      }
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: JSON.stringify({ profile: cfg.profile, violations }) 
+          }
+        ]
+      };
+    }
+    
+    case "review.fixIds.plan": {
+      const files = await pickFilesFromCatalog(args.cwd as string);
+      const used = await gatherUsedIds(args.cwd as string, files);
+      const fixes: any[] = [];
+      for (const f of files) {
+        const p = path.join(args.cwd as string, f);
+        const txt = await fs.readFile(p, "utf-8");
+        const prefix = slugifyBase(f);
+        const plan = planFixIdsForFile(f, txt, used, prefix);
+        fixes.push(...plan);
+      }
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: JSON.stringify({ count: fixes.length, fixes }) 
+          }
+        ]
+      };
+    }
+    
+    case "review.fixIds.apply": {
+      const applied = await applyFixes(args.cwd as string, args.fixes as any[]);
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: JSON.stringify({ applied }) 
+          }
+        ]
+      };
+    }
+    
+    case "review.lint": {
+      const files = await pickFilesFromCatalog(args.cwd as string);
+      const diagnostics: any[] = [];
+      for (const f of files) {
+        try {
+          await withBundle(args.cwd as string, ["review-compile", "--target=latex", "--footnotetext", f]);
+        } catch (e: any) {
+          const stderr = e?.stderr || e?.message || "";
+          diagnostics.push(...parseStderr(stderr, f));
+          continue;
+        }
+      }
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: JSON.stringify({ diagnostics }) 
+          }
+        ]
+      };
+    }
+    
+    default:
+      throw new Error(`Unknown tool: ${name}`);
+  }
+});
+
+// Start server
+const transport = new StdioServerTransport();
+await server.connect(transport);
 console.log("[review-mcp] Minimal MCP server started.");
