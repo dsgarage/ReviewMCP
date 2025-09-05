@@ -144,6 +144,47 @@ node tools/review-mcp/scripts/ci-lint.mjs --cwd . --apply-ids
 
 ---
 
+
+---
+
+## セットアップ（ClaudeCode / Claude Desktop 側）
+
+MCPサーバーを利用するには、ClaudeCode や Claude Desktop 側で「サーバー登録」が必要です。
+
+### 方法A: Claude Desktop の設定ファイルに追記
+1. mac の場合、`~/Library/Application Support/Claude/claude_desktop_config.json` を開きます。  
+   （アプリの `Developer Settings → Edit Config` からも編集可能）
+
+2. `"mcpServers"` に以下のように追加してください（絶対パスに置き換え必須）：
+```json
+{
+  "mcpServers": {
+    "review-mcp": {
+      "command": "node",
+      "args": [
+        "/Users/あなたのユーザー名/books/mybook/tools/review-mcp/node_modules/.bin/tsx",
+        "/Users/あなたのユーザー名/books/mybook/tools/review-mcp/src/index.ts"
+      ]
+    }
+  }
+}
+```
+
+3. Claude Desktop を再起動すると、ツール一覧に `review-mcp` が表示されます。  
+   ログは `~/Library/Logs/Claude/mcp*.log` で確認可能です。
+
+### 方法B: ClaudeCode (VS Code拡張) でCLI追加
+VS Code の「Claude Code」拡張を使用している場合、以下のコマンドで追加できます：
+```bash
+cd ~/books/mybook
+claude mcp add review-mcp -s project --   node ./tools/review-mcp/node_modules/.bin/tsx ./tools/review-mcp/src/index.ts
+```
+
+> `-s` はスコープを指定します（`project` / `local` / `user`）。  
+> まずは `local` で試してから、安定したら `project` に切り替えるのが安全です。
+
+---
+
 ## 開発メモ
 - `src/index.ts` の `review.tags.list` を差し替えて、動的プローブ（`review-compile` にダミー原稿を通して合否判定）＋ `cache/` 保持を実装してください。
 - `cache/` は `.gitignore` 推奨（配布時は空にしてOK）。
