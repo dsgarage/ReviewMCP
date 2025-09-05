@@ -8,21 +8,53 @@
 
 ---
 
+## プロジェクトルート（cwd）の指定について
+
+MCPサーバーの各ツール呼び出しでは **cwd** を指定します。  
+これは「Re:VIEWプロジェクトのルートディレクトリ」のことです。
+
+典型的な構成例：
+
+```
+mybook/              ← ここが cwd
+├── config.yml       ← 必須
+├── catalog.yml      ← 必須
+├── ch01.re
+├── ch02.re
+├── images/
+└── ...
+```
+
+つまり、**`config.yml` と `catalog.yml` があるディレクトリ**を `cwd` として渡してください。
+
+### MCPツール呼び出し例
+```json
+{
+  "tool": "review.lint",
+  "args": { "cwd": "/Users/daisuke/books/mybook" }
+}
+```
+
+### CLIから直接呼ぶ場合
+```bash
+# 診断のみ
+node tools/review-mcp/scripts/ci-lint.mjs --cwd /Users/daisuke/books/mybook
+
+# ID自動修正も適用
+node tools/review-mcp/scripts/ci-lint.mjs --cwd /Users/daisuke/books/mybook --apply-ids
+```
+
+> **ポイント:** `cwd` に渡すのは必ず「プロジェクトのトップディレクトリ」です。  
+> その直下に `config.yml` と `catalog.yml` が存在していなければいけません。
+
+---
+
 ## 同梱ツール（MVP）
 - `review.version` — Re:VIEW CLI バージョン取得
 - `review.tags.list` — 内蔵の保守的Allowlist（後で動的プローブに置換予定）
 - `review.enforceTags.check` — 許可外タグの検出（保存ブロック用）
 - `review.fixIds.plan` / `review.fixIds.apply` — IDの空欄／重複の自動修正
 - `review.lint` — 高速Lint（各 `.re` を latex 変換に通して stderr を解析）
-
-> 将来拡張：`review.tags.list` を「バージョン／ターゲット依存の**動的プローブ＋キャッシュ**」に差し替えると、5.8/2.5 の**実体**に即した確定タグ一覧が返せます。
-
----
-
-## 動作要件
-- Node.js 18+
-- Ruby / Bundler / Re:VIEW（プロジェクト側で `bundle exec review --version` が通ること）
-- Re:VIEWプロジェクトに `config.yml` と `catalog.yml` が存在すること
 
 ---
 
@@ -32,7 +64,7 @@
 1. 本リポジトリのリリースで配布する `review-mcp-min.zip` を展開  
 2. `npm i`  
 3. `npm run start` で MCP サーバー起動  
-4. ClaudeCode から MCP サーバーに接続し、ツール呼び出し時の引数 `cwd` に **Re:VIEWプロジェクトのルート**（`config.yml`/`catalog.yml` がある場所）を渡します。
+4. ClaudeCode から MCP サーバーに接続し、ツール呼び出し時の引数 `cwd` に **Re:VIEWプロジェクトのルート**を指定します。
 
 ### B. Git サブモジュール運用
 1. GitHub 上に本サーバー（独立リポジトリ）を作成（例：`your-org/review-mcp`）  
@@ -49,21 +81,12 @@
    ```
 4. ClaudeCode 側からは `cwd` を **プロジェクトルート**に指定してツールを呼び出してください。
 
-> 推奨：サブモジュールは **タグ（例：v0.1.0）** に固定し、各プロジェクトごとにバージョンを明示管理。
-
 ---
 
-## 使い方（ClaudeCode 連携の例）
-
-### 保存時の推奨フロー
+## 保存時の推奨フロー
 1. `review.enforceTags.check` — 許可外タグがあれば**保存を中断**  
 2. `review.fixIds.plan` → `review.fixIds.apply` — ID を**自動修正**（`.bak` を残す）  
 3. `review.lint` — 代表的な注意点（例：`//' seen but is not valid command`、`duplicate ID`）を警告表示
-
-> **保存を止めるのは“許可外タグのみ”**に限定。執筆の流れを阻害しない方針です。
-
-### MCP ツール引数の基本
-- すべてのツールで `cwd` を Re:VIEWプロジェクト直下にしてください。
 
 ---
 
@@ -82,19 +105,6 @@ node tools/review-mcp/scripts/ci-lint.mjs --cwd .
 node tools/review-mcp/scripts/ci-lint.mjs --cwd . --apply-ids
 ```
 
-**Rake から呼ぶ例：**
-```ruby
-desc 'MCP: enforce tags, fix IDs (plan), fast lint'
-task 'mcp:lint' do
-  sh "node tools/review-mcp/scripts/ci-lint.mjs --cwd ."
-end
-
-desc 'MCP: enforce tags, apply ID fixes, fast lint'
-task 'mcp:fix' do
-  sh "node tools/review-mcp/scripts/ci-lint.mjs --cwd . --apply-ids"
-end
-```
-
 ---
 
 ## 設定ファイル（任意） `review-mcp.json`
@@ -106,8 +116,6 @@ end
   "autoFixIdsOnSave": true
 }
 ```
-- `profile` は将来、`"review-5.8" | "review-2.5" | "dual"` を想定（本雛形では未使用のダミー）  
-- `target` は標準 `latex`（pdfmaker 前段の検証に合わせるため）
 
 ---
 
@@ -121,12 +129,6 @@ end
 - 本雛形では **保守的Allowlist** によるガードのみ提供しています。  
 - 将来的に `review.tags.list` を **動的プローブ＋キャッシュ**に差し替え、5.8/2.5 双方で“実際に通るタグ”集合を確定させます。  
 - `profile: "dual"`（共通集合のみ許可）で“どちらにも通る原稿”を担保する運用を想定。
-
----
-
-## 既知の限界
-- タグ一覧は**内蔵の暫定集合**です（誤検出を避けるため、やや保守的）。
-- LaTeX / PDFMaker 段階のすべてのエラーを保存時に拾うことはしません（執筆体験を重視）。必要に応じて CI で補完してください。
 
 ---
 
