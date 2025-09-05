@@ -1,0 +1,30 @@
+# ClaudeCode related files
+.claude/
+CLAUDE.md
+.claudecode*
+
+# macOS
+.DS_Store
+
+# Node modules (if any)
+node_modules/
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build outputs
+dist/
+build/
+out/
