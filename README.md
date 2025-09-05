@@ -28,6 +28,18 @@ mybook/              ← ここが cwd
 つまり、**`config.yml` と `catalog.yml` があるディレクトリ**を `cwd` として渡してください。
 
 ### MCPツール呼び出し例
+### 補足: 普段からプロジェクト直下に移動して作業する場合
+もし常に `cd mybook/` のように **プロジェクトルートで作業**しているなら、
+`--cwd .` を指定するだけで十分です。
+
+例:
+```bash
+cd ~/books/mybook
+node tools/review-mcp/scripts/ci-lint.mjs --cwd .
+```
+
+将来的には `--cwd` を省略しても `process.cwd()` を自動で使う仕様に拡張可能です。
+
 ```json
 {
   "tool": "review.lint",
