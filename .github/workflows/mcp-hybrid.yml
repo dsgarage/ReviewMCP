@@ -1,0 +1,183 @@
+name: MCP Hybrid Pipeline CI
+
+on:
+  push:
+    branches: [ main, develop, "feature/*" ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-hybrid-pipeline:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+        ruby-version: ["3.x"]
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+
+    - name: Setup Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: ${{ matrix.ruby-version }}
+        bundler-cache: true
+
+    - name: Install TeX Live
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y texlive-lang-japanese texlive-fonts-recommended texlive-latex-extra
+        sudo apt-get install -y texlive-luatex texlive-xetex
+        
+    - name: Install Re:VIEW
+      run: |
+        gem install review
+        review --version
+
+    - name: Install Node dependencies
+      run: npm ci
+
+    - name: Build TypeScript
+      run: npm run build
+
+    - name: Test security configuration loading
+      run: |
+        echo "Testing SSOT security configuration..."
+        node -e "
+        import('./dist/config/security.js').then(async (mod) => {
+          const config = await mod.loadSecurityConfig('.');
+          console.log('Security config loaded:', config);
+          console.log('Source:', config.source);
+          if (config.source === 'default') {
+            console.log('WARNING: Using default config - ReviewExtention not found');
+          }
+        });
+        "
+
+    - name: Run preprocessor test
+      run: |
+        echo "Testing preprocessor command..."
+        if [ -f "articles/sample.re" ]; then
+          node dist/commands/hybrid-pipeline.js preprocess --pattern "articles/*.re" --output ".out"
+        else
+          echo "No sample.re found, skipping preprocessor test"
+        fi
+
+    - name: Check Ruby extensions
+      run: |
+        echo "Checking Ruby extensions..."
+        if [ -f "review-ext.rb" ]; then
+          ruby -r ./review-ext.rb -e "puts 'Extensions loaded successfully'"
+        else
+          echo "No review-ext.rb found, skipping extension check"
+        fi
+
+    - name: Test mapfile security validation
+      run: |
+        echo "Testing mapfile security..."
+        mkdir -p code
+        echo "// Sample code for testing" > code/sample.cs
+        node -e "
+        import('./dist/config/security.js').then(async (mod) => {
+          const config = await mod.loadSecurityConfig('.');
+          
+          // Test valid path
+          const valid = mod.validateMapfilePath('code/sample.cs', config);
+          console.log('Valid path test:', valid);
+          
+          // Test invalid path (traversal)
+          const invalid = mod.validateMapfilePath('../../../etc/passwd', config);
+          console.log('Invalid path test:', invalid);
+          
+          // Test file size
+          const size = await mod.validateMapfileSize('code/sample.cs', '.', config);
+          console.log('File size test:', size);
+        });
+        "
+
+    - name: Build PDF (if config exists)
+      run: |
+        if [ -f "config.yml" ] && [ -f "catalog.yml" ]; then
+          echo "Building PDF with hybrid pipeline..."
+          # Use the MCP command via Node
+          node -e "
+          import('./dist/commands/hybrid-pipeline.js').then(async (mod) => {
+            const result = await mod.hybridCommands.buildPdfHybrid({
+              cwd: '.',
+              config: 'config.yml'
+            });
+            console.log('PDF build result:', result);
+            if (!result.success) {
+              process.exit(1);
+            }
+          });
+          "
+        else
+          echo "No Re:VIEW project files found, skipping PDF build"
+        fi
+
+    - name: Upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: mcp-hybrid-artifacts-${{ matrix.node-version }}-${{ matrix.ruby-version }}
+        path: |
+          .artifacts/
+          *.pdf
+          .out/
+        retention-days: 7
+
+    - name: Security config comparison
+      if: always()
+      run: |
+        echo "Comparing MCP config with ReviewExtention..."
+        node -e "
+        import('./dist/config/security.js').then(async (mod) => {
+          const config = await mod.loadSecurityConfig('.');
+          const comparison = await mod.compareWithReviewExtention('.', config);
+          console.log('Config comparison:', comparison);
+          if (!comparison.matching && comparison.differences.length > 0) {
+            console.warn('Configuration differences detected:', comparison.differences);
+          }
+        });
+        "
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: TypeScript type check
+      run: npx tsc --noEmit
+
+    - name: Check for hardcoded security values
+      run: |
+        echo "Checking for hardcoded security values..."
+        # Check that we're not hardcoding MAX_FILE_SIZE or ALLOWED_EXTENSIONS
+        if grep -r "MAX_FILE_SIZE\s*=\s*[0-9]" src/ --include="*.ts" | grep -v "DEFAULT_SECURITY"; then
+          echo "ERROR: Found hardcoded MAX_FILE_SIZE values"
+          exit 1
+        fi
+        if grep -r "ALLOWED_EXTENSIONS\s*=\s*\[" src/ --include="*.ts" | grep -v "DEFAULT_SECURITY"; then
+          echo "ERROR: Found hardcoded ALLOWED_EXTENSIONS values"
+          exit 1
+        fi
+        echo "No hardcoded security values found (SSOT check passed)"

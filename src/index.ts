@@ -7,6 +7,14 @@ import { readFile, writeFile } from "node:fs/promises";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import YAML from "yaml";
+import { hybridCommands } from "./commands/hybrid-pipeline.js";
+import { 
+  loadSecurityConfig, 
+  validateMapfilePath, 
+  validateMapfileSize,
+  sanitizeMapfile,
+  compareWithReviewExtention 
+} from "./config/security.js";
 
 const execp = promisify(execFile);
 
@@ -300,6 +308,96 @@ const tools = [
       properties: { cwd: { type: "string" } }, 
       required: ["cwd"] 
     }
+  },
+
+  // Hybrid pipeline commands
+  {
+    name: "review.preprocess",
+    description: "JS preprocessor only - normalizes input and adds metadata",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cwd: { type: "string" },
+        pattern: { type: "string" },
+        output: { type: "string" },
+        stats: { type: "boolean" }
+      },
+      required: ["cwd"]
+    }
+  },
+
+  {
+    name: "review.build-pdf-hybrid",
+    description: "JS→Ruby hybrid pipeline for PDF generation (PDF first priority)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cwd: { type: "string" },
+        config: { type: "string" },
+        skipPreprocess: { type: "boolean" }
+      },
+      required: ["cwd"]
+    }
+  },
+
+  {
+    name: "review.check-ruby-extensions",
+    description: "Verify Ruby extensions (ReviewExtention) are loaded correctly",
+    inputSchema: {
+      type: "object",
+      properties: { cwd: { type: "string" } },
+      required: ["cwd"]
+    }
+  },
+
+  {
+    name: "review.test-mapfile",
+    description: "Test #@mapfile macro with security validation (developer tool)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cwd: { type: "string" },
+        file: { type: "string" }
+      },
+      required: ["cwd", "file"]
+    }
+  },
+
+  // Security SSOT commands
+  {
+    name: "review.security.config",
+    description: "Get current security configuration (SSOT from ReviewExtention)",
+    inputSchema: {
+      type: "object",
+      properties: { 
+        cwd: { type: "string" },
+        forceReload: { type: "boolean" }
+      },
+      required: ["cwd"]
+    }
+  },
+
+  {
+    name: "review.security.validate-mapfile",
+    description: "Validate mapfile path and content against security policy",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cwd: { type: "string" },
+        filepath: { type: "string" }
+      },
+      required: ["cwd", "filepath"]
+    }
+  },
+
+  {
+    name: "review.security.compare",
+    description: "Compare MCP config with ReviewExtention config to ensure SSOT",
+    inputSchema: {
+      type: "object",
+      properties: { cwd: { type: "string" } },
+      required: ["cwd"]
+    }
   }
 ];
 
@@ -437,6 +535,198 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           { 
             type: "text", 
             text: JSON.stringify({ diagnostics }) 
+          }
+        ]
+      };
+    }
+    
+    case "review.preprocess": {
+      const result = await hybridCommands.preprocess({
+        cwd: args.cwd as string,
+        pattern: args.pattern as string | undefined,
+        output: args.output as string | undefined,
+        stats: args.stats as boolean | undefined
+      });
+      return {
+        content: [
+          { type: "text", text: JSON.stringify(result) }
+        ]
+      };
+    }
+
+    case "review.build-pdf-hybrid": {
+      const result = await hybridCommands.buildPdfHybrid({
+        cwd: args.cwd as string,
+        config: args.config as string | undefined,
+        skipPreprocess: args.skipPreprocess as boolean | undefined
+      });
+      return {
+        content: [
+          { type: "text", text: JSON.stringify(result) }
+        ]
+      };
+    }
+
+    case "review.check-ruby-extensions": {
+      const result = await hybridCommands.checkRubyExtensions({
+        cwd: args.cwd as string
+      });
+      return {
+        content: [
+          { type: "text", text: JSON.stringify(result) }
+        ]
+      };
+    }
+
+    case "review.test-mapfile": {
+      const securityConfig = await loadSecurityConfig(args.cwd as string);
+      const pathValidation = validateMapfilePath(args.file as string, securityConfig);
+      
+      if (!pathValidation.valid) {
+        return {
+          content: [
+            { 
+              type: "text", 
+              text: JSON.stringify({ 
+                success: false, 
+                error: `Security validation failed: ${pathValidation.reason}` 
+              }) 
+            }
+          ]
+        };
+      }
+
+      const sizeValidation = await validateMapfileSize(
+        args.file as string, 
+        args.cwd as string, 
+        securityConfig
+      );
+      
+      if (!sizeValidation.valid) {
+        return {
+          content: [
+            { 
+              type: "text", 
+              text: JSON.stringify({ 
+                success: false, 
+                error: `File size validation failed: ${sizeValidation.reason}` 
+              }) 
+            }
+          ]
+        };
+      }
+
+      const result = await hybridCommands.testMapfile({
+        file: args.file as string,
+        cwd: args.cwd as string
+      });
+      
+      return {
+        content: [
+          { type: "text", text: JSON.stringify(result) }
+        ]
+      };
+    }
+
+    case "review.security.config": {
+      const config = await loadSecurityConfig(
+        args.cwd as string,
+        args.forceReload as boolean | undefined
+      );
+      return {
+        content: [
+          { type: "text", text: JSON.stringify(config) }
+        ]
+      };
+    }
+
+    case "review.security.validate-mapfile": {
+      const config = await loadSecurityConfig(args.cwd as string);
+      const pathValidation = validateMapfilePath(args.filepath as string, config);
+      
+      if (!pathValidation.valid) {
+        return {
+          content: [
+            { 
+              type: "text", 
+              text: JSON.stringify({ 
+                valid: false, 
+                reason: pathValidation.reason,
+                config: { source: config.source }
+              }) 
+            }
+          ]
+        };
+      }
+
+      const sizeValidation = await validateMapfileSize(
+        args.filepath as string,
+        args.cwd as string,
+        config
+      );
+
+      if (!sizeValidation.valid) {
+        return {
+          content: [
+            { 
+              type: "text", 
+              text: JSON.stringify({ 
+                valid: false, 
+                reason: sizeValidation.reason,
+                size: sizeValidation.size,
+                config: { source: config.source, maxFileSize: config.maxFileSize }
+              }) 
+            }
+          ]
+        };
+      }
+
+      const fullPath = path.join(args.cwd as string, args.filepath as string);
+      try {
+        const content = await fs.readFile(fullPath, "utf-8");
+        const sanitization = await sanitizeMapfile(content, args.filepath as string, config);
+        
+        return {
+          content: [
+            { 
+              type: "text", 
+              text: JSON.stringify({ 
+                valid: sanitization.safe,
+                size: sizeValidation.size,
+                issues: sanitization.issues,
+                config: { source: config.source }
+              }) 
+            }
+          ]
+        };
+      } catch (error: any) {
+        return {
+          content: [
+            { 
+              type: "text", 
+              text: JSON.stringify({ 
+                valid: false, 
+                error: error.message 
+              }) 
+            }
+          ]
+        };
+      }
+    }
+
+    case "review.security.compare": {
+      const currentConfig = await loadSecurityConfig(args.cwd as string);
+      const comparison = await compareWithReviewExtention(args.cwd as string, currentConfig);
+      
+      return {
+        content: [
+          { 
+            type: "text", 
+            text: JSON.stringify({
+              currentSource: currentConfig.source,
+              matching: comparison.matching,
+              differences: comparison.differences
+            }) 
           }
         ]
       };
