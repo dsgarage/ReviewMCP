@@ -1,4 +1,3 @@
-
 #!/usr/bin/env node
 /**
  * Headless checker for Re:VIEW projects (no MCP client needed).
