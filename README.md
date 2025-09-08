@@ -1,125 +1,180 @@
-# review-mcp-min（Re:VIEW用 最小MCPサーバー）
+# review-mcp-min
 
-**目的：** 執筆の手を止めずに、Re:VIEW原稿のエラーを未然に防ぐ。  
-- 保存時に **許可外タグをブロック**（“勝手なタグ定義”を禁止）  
-- **ID（空／重複）を自動修正**（人間可読な命名でユニーク化）  
-- 迅速な **Lint**（`review-compile --target=latex`）で代表的な落とし穴を検出  
-- Re:VIEW **5.8 / 2.5(ReviewStarter)** の両環境に将来的に対応可能（本雛形は5.8を前提に構成）
+Minimal MCP (Model Context Protocol) server for Re:VIEW document processing with JS/Ruby hybrid pipeline.
 
----
+## Version
 
-## プロジェクトルート（cwd）の指定について
+v0.1.0 - Initial release with hybrid pipeline support
 
-MCPサーバーの各ツール呼び出しでは **cwd** を指定します。  
-これは「Re:VIEWプロジェクトのルートディレクトリ」のことです。
+## Features
 
-典型的な構成例：
+### Core Functionality
+- **Tag Enforcement**: Validates Re:VIEW markup tags against configurable allowlists
+- **ID Management**: Automatically fixes empty/duplicate IDs in blocks and captions
+- **Fast Linting**: Quick sanity checks via LaTeX compilation
+- **Hybrid Pipeline**: JS preprocessing + Ruby (LaTeX Builder) for PDF generation
+
+### Security (SSOT - Single Source of Truth)
+- Dynamic security configuration loading from ReviewExtention
+- Two-layer defense: MCP pre-sanitization + Ruby final validation
+- Path traversal and absolute path blocking for mapfile macros
+- File size and extension validation
+
+### MCP Commands
+
+#### Basic Commands
+- `review.version` - Get Re:VIEW CLI version
+- `review.tags.list` - List allowed tags
+- `review.enforceTags.check` - Check for unknown tags
+- `review.fixIds.plan` - Plan ID fixes for empty/duplicate IDs
+- `review.fixIds.apply` - Apply ID fixes with backup
+- `review.lint` - Run fast lint checks
+
+#### Hybrid Pipeline Commands
+- `review.preprocess` - JS preprocessing (currently passthrough)
+- `review.build-pdf-hybrid` - Build PDF with hybrid pipeline
+- `review.check-ruby-extensions` - Verify Ruby extensions
+- `review.test-mapfile` - Test mapfile with security validation
+
+#### Security Commands
+- `review.security.config` - Get current security configuration
+- `review.security.validate-mapfile` - Validate mapfile paths
+- `review.security.compare` - Compare configs for SSOT compliance
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/dsgarage/ReviewMCP.git
+cd review-mcp-min
+
+# Install dependencies
+npm install
+
+# Build TypeScript
+npm run build
+
+# Start MCP server
+npm start
+```
+
+## Usage
+
+### Project Root (cwd) Specification
+
+All MCP tools require a `cwd` parameter pointing to your Re:VIEW project root:
 
 ```
-mybook/              ← ここが cwd
-├── config.yml       ← 必須
-├── catalog.yml      ← 必須
+mybook/              ← This is cwd
+├── config.yml       ← Required
+├── catalog.yml      ← Required
 ├── ch01.re
 ├── ch02.re
 ├── images/
 └── ...
 ```
 
-つまり、**`config.yml` と `catalog.yml` があるディレクトリ**を `cwd` として渡してください。
+The `cwd` must be the directory containing `config.yml` and `catalog.yml`.
 
-### MCPツール呼び出し例
-### 補足: 普段からプロジェクト直下に移動して作業する場合
-もし常に `cd mybook/` のように **プロジェクトルートで作業**しているなら、
-`--cwd .` を指定するだけで十分です。
+### With Claude Desktop
 
-例:
-```bash
-cd ~/books/mybook
-node tools/review-mcp/scripts/ci-lint.mjs --cwd .
-```
-
-将来的には `--cwd` を省略しても `process.cwd()` を自動で使う仕様に拡張可能です。
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
-  "tool": "review.lint",
-  "args": { "cwd": "/Users/daisuke/books/mybook" }
+  "mcpServers": {
+    "review-mcp": {
+      "command": "node",
+      "args": [
+        "/path/to/review-mcp-min/node_modules/.bin/tsx",
+        "/path/to/review-mcp-min/src/index.ts"
+      ]
+    }
+  }
 }
 ```
 
-### CLIから直接呼ぶ場合
-```bash
-# 診断のみ
-node tools/review-mcp/scripts/ci-lint.mjs --cwd /Users/daisuke/books/mybook
+### With ClaudeCode
 
-# ID自動修正も適用
-node tools/review-mcp/scripts/ci-lint.mjs --cwd /Users/daisuke/books/mybook --apply-ids
+```bash
+cd ~/books/mybook
+claude mcp add review-mcp -s project -- \
+  node ./tools/review-mcp/node_modules/.bin/tsx ./src/index.ts
 ```
 
-> **ポイント:** `cwd` に渡すのは必ず「プロジェクトのトップディレクトリ」です。  
-> その直下に `config.yml` と `catalog.yml` が存在していなければいけません。
+## Project Structure
 
----
-
-## 同梱ツール（MVP）
-- `review.version` — Re:VIEW CLI バージョン取得
-- `review.tags.list` — 内蔵の保守的Allowlist（後で動的プローブに置換予定）
-- `review.enforceTags.check` — 許可外タグの検出（保存ブロック用）
-- `review.fixIds.plan` / `review.fixIds.apply` — IDの空欄／重複の自動修正
-- `review.lint` — 高速Lint（各 `.re` を latex 変換に通して stderr を解析）
-
----
-
-## 展開方法（2つの配布形態）
-
-### A. リリースZIPとして展開（単体配布）
-1. 本リポジトリのリリースで配布する `review-mcp-min.zip` を展開  
-2. `npm i`  
-3. `npm run start` で MCP サーバー起動  
-4. ClaudeCode から MCP サーバーに接続し、ツール呼び出し時の引数 `cwd` に **Re:VIEWプロジェクトのルート**を指定します。
-
-### B. Git サブモジュール運用
-1. GitHub 上に本サーバー（独立リポジトリ）を作成（例：`your-org/review-mcp`）  
-2. 各 Re:VIEW プロジェクトでサブモジュールとして追加：
-   ```bash
-   git submodule add git@github.com:your-org/review-mcp.git tools/review-mcp
-   git submodule update --init --recursive
-   ```
-3. 実行：
-   ```bash
-   cd tools/review-mcp
-   npm i
-   npm run start
-   ```
-4. ClaudeCode 側からは `cwd` を **プロジェクトルート**に指定してツールを呼び出してください。
-
----
-
-## 保存時の推奨フロー
-1. `review.enforceTags.check` — 許可外タグがあれば**保存を中断**  
-2. `review.fixIds.plan` → `review.fixIds.apply` — ID を**自動修正**（`.bak` を残す）  
-3. `review.lint` — 代表的な注意点（例：`//' seen but is not valid command`、`duplicate ID`）を警告表示
-
----
-
-## CI / Rake 連携（ヘッドレス実行）
-
-### `scripts/ci-lint.mjs`
-- MCP クライアント不要のヘッドレス検査スクリプトです。  
-- 機能：許可外タグ検出、ID自動修正の計画／適用、快速Lint。
-
-**使い方：**
-```bash
-# 診断のみ（プロジェクトルートで）
-node tools/review-mcp/scripts/ci-lint.mjs --cwd .
-
-# ID自動修正も適用
-node tools/review-mcp/scripts/ci-lint.mjs --cwd . --apply-ids
+```
+review-mcp-min/
+├── src/
+│   ├── index.ts                 # MCP server main
+│   ├── commands/
+│   │   └── hybrid-pipeline.ts   # Hybrid pipeline commands
+│   ├── config/
+│   │   └── security.ts          # SSOT security configuration
+│   └── utils/
+│       └── runCommand.ts        # Command execution utilities
+├── articles/                    # Re:VIEW test documents
+│   ├── chapter01.re
+│   └── chapter02.re
+├── config.yml                   # Re:VIEW configuration
+├── catalog.yml                  # Re:VIEW catalog
+└── test-build.js               # Test script for hybrid pipeline
 ```
 
----
+## Development
 
-## 設定ファイル（任意） `review-mcp.json`
+```bash
+# Run in development mode
+npm run dev
+
+# Type checking
+npm run typecheck
+
+# Build
+npm run build
+
+# Test PDF generation
+node test-build.js
+```
+
+## Testing
+
+The repository includes test Re:VIEW documents demonstrating various features:
+- Inline tags (strong, em, code, tt, kw)
+- Block tags (list, emlist, note, memo, cmd, quote)
+- Tables, source code blocks, footnotes
+- Security and SSOT configuration examples
+
+Run the test build:
+```bash
+review-pdfmaker config.yml
+```
+
+## CI/CD
+
+GitHub Actions workflow included (`.github/workflows/mcp-hybrid.yml`) for:
+- Multi-version testing (Node.js 18/20, Ruby 3.x)
+- Security configuration validation
+- PDF generation testing
+- SSOT compliance checking
+
+## Requirements
+
+- Node.js 18+
+- Ruby + Bundler
+- Re:VIEW gem (5.x recommended)
+- TeX Live (for PDF generation with uplatex)
+
+## Recommended Workflow
+
+1. **On save**: `review.enforceTags.check` - Block unknown tags
+2. **Auto-fix**: `review.fixIds.plan` → `review.fixIds.apply` - Fix IDs
+3. **Lint**: `review.lint` - Show warnings
+
+## Configuration
+
+Optional `review-mcp.json`:
 ```json
 {
   "profile": "dual",
@@ -129,62 +184,29 @@ node tools/review-mcp/scripts/ci-lint.mjs --cwd . --apply-ids
 }
 ```
 
----
+## License
 
-## よくある質問
+MIT
 
-### Q. MCPサーバーはプロジェクト直下に置くべき？
-- どちらでもOKです。**別ディレクトリで独立運用**しても、**サブディレクトリに同梱**しても動作します。  
-- 重要なのは、ツール引数 `cwd` を **Re:VIEWプロジェクトのルート**にすること。
+## Contributing
 
-### Q. 2.5(ReviewStarter) との両対応は？
-- 本雛形では **保守的Allowlist** によるガードのみ提供しています。  
-- 将来的に `review.tags.list` を **動的プローブ＋キャッシュ**に差し替え、5.8/2.5 双方で“実際に通るタグ”集合を確定させます。  
-- `profile: "dual"`（共通集合のみ許可）で“どちらにも通る原稿”を担保する運用を想定。
+Issues and PRs welcome at [GitHub repository](https://github.com/dsgarage/ReviewMCP)
 
----
+## Related Issues
 
+- [#5](https://github.com/dsgarage/ReviewMCP/issues/5) - Ruby implementation integration
+- [#6](https://github.com/dsgarage/ReviewMCP/issues/6) - Hybrid pipeline commands
+- [#7](https://github.com/dsgarage/ReviewMCP/issues/7) - SSOT security configuration
 
----
+## Author
 
-## セットアップ（ClaudeCode / Claude Desktop 側）
+@dsgarage
 
-MCPサーバーを利用するには、ClaudeCode や Claude Desktop 側で「サーバー登録」が必要です。
+## Changelog
 
-### 方法A: Claude Desktop の設定ファイルに追記
-1. mac の場合、`~/Library/Application Support/Claude/claude_desktop_config.json` を開きます。  
-   （アプリの `Developer Settings → Edit Config` からも編集可能）
-
-2. `"mcpServers"` に以下のように追加してください（絶対パスに置き換え必須）：
-```json
-{
-  "mcpServers": {
-    "review-mcp": {
-      "command": "node",
-      "args": [
-        "/Users/あなたのユーザー名/books/mybook/tools/review-mcp/node_modules/.bin/tsx",
-        "/Users/あなたのユーザー名/books/mybook/tools/review-mcp/src/index.ts"
-      ]
-    }
-  }
-}
-```
-
-3. Claude Desktop を再起動すると、ツール一覧に `review-mcp` が表示されます。  
-   ログは `~/Library/Logs/Claude/mcp*.log` で確認可能です。
-
-### 方法B: ClaudeCode (VS Code拡張) でCLI追加
-VS Code の「Claude Code」拡張を使用している場合、以下のコマンドで追加できます：
-```bash
-cd ~/books/mybook
-claude mcp add review-mcp -s project --   node ./tools/review-mcp/node_modules/.bin/tsx ./tools/review-mcp/src/index.ts
-```
-
-> `-s` はスコープを指定します（`project` / `local` / `user`）。  
-> まずは `local` で試してから、安定したら `project` に切り替えるのが安全です。
-
----
-
-## 開発メモ
-- `src/index.ts` の `review.tags.list` を差し替えて、動的プローブ（`review-compile` にダミー原稿を通して合否判定）＋ `cache/` 保持を実装してください。
-- `cache/` は `.gitignore` 推奨（配布時は空にしてOK）。
+### v0.1.0 (2025-01-08)
+- Initial release
+- Hybrid JS/Ruby pipeline implementation
+- SSOT security configuration
+- Basic Re:VIEW tag validation and ID management
+- Test documents and PDF generation support
