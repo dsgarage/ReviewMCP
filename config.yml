@@ -1,0 +1,39 @@
+# Re:VIEW config.yml for test project
+bookname: test-hybrid-pipeline
+booktitle: "MCP Hybrid Pipeline Test Book"
+aut: ["MCP Test Author"]
+date: 2025-01-08
+history: [["2025-01-08", "初版"]]
+rights: "© 2025 MCP Test"
+description: "Testing JS/Ruby hybrid pipeline for PDF generation"
+
+language: ja
+review_version: 5.0
+
+texstyle: []
+texdocumentclass: ["jsbook", "uplatex,papersize,b5paper,openany"]
+texcommand: "uplatex"
+dvicommand: "dvipdfmx"
+
+contentdir: articles
+imagedir: images
+
+stylesheet: ["style.css"]
+
+pdfmaker:
+  texstyle: []
+  texdocumentclass: ["jsbook", "uplatex,papersize,b5paper,openany"]
+  
+epubmaker:
+  htmlext: xhtml
+  
+textmaker:
+  page_metric: "A5"
+
+catalog:
+  PREDEF:
+  CHAPS:
+    - chapter01.re
+    - chapter02.re
+  APPENDIX:
+  POSTDEF:

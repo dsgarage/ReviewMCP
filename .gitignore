@@ -28,3 +28,28 @@ logs/
 dist/
 build/
 out/
+
+# Re:VIEW build artifacts
+*.pdf
+*.dvi
+*.aux
+*.log
+*.toc
+*.bbl
+*.blg
+*.idx
+*.ilg
+*.ind
+__REVIEW_BOOK__.*
+.review
+book-pdf/
+book-epub/
+book-text/
+.out/
+.artifacts/
+sty/
+
+# Ruby/Bundler
+Gemfile.lock
+.bundle/
+vendor/bundle/
